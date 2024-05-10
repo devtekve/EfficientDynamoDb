@@ -53,6 +53,14 @@ namespace EfficientDynamoDb.Internal.Metadata
             ClassType = ConverterBase.ClassType;
             var typeInterfaces = new Stack<Type>(type.GetInterfaces());
 
+            var autoProperty = typeInterfaces.Any(x => x.GetCustomAttribute<DynamoDbAutoPropertyAttribute>() != null);
+            
+            // We store explicitly ignored properties to avoid adding them implicitly via auto property
+            var explicitlyIgnored = typeInterfaces.SelectMany(x => x.GetProperties())
+                .Where(x => x.GetCustomAttribute<DynamoDbIgnoreAttribute>() != null)
+                .Select(p => p.Name)
+                .ToHashSet();
+
             switch (ClassType)
             {
                 case DdbClassType.Object:
@@ -71,7 +79,15 @@ namespace EfficientDynamoDb.Internal.Metadata
 
                         foreach (PropertyInfo propertyInfo in currentType.GetProperties(bindingFlags))
                         {
+                            if (propertyInfo.GetCustomAttribute<DynamoDbIgnoreAttribute>() != null)
+                                continue;
+                            
                             var attribute = propertyInfo.GetCustomAttribute<DynamoDbPropertyAttribute>();
+                            
+                            // If property is an auto property and doesn't have a DynamoDbPropertyAttribute and it's not explicitly ignored
+                            if (autoProperty && attribute == null && !explicitlyIgnored.Contains(propertyInfo.Name)) 
+                                attribute ??= new DynamoDbPropertyAttribute(propertyInfo.Name);
+                            
                             if (attribute == null)
                                 continue;
 
