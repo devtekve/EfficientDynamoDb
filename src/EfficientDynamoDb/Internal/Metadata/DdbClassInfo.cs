@@ -76,11 +76,12 @@ namespace EfficientDynamoDb.Internal.Metadata
                     var typeInterfaces = type.GetInterfaces().ToHashSet();
                     var baseTypes = GetBaseTypes(type).ToHashSet();
                     
-                    TableName ??= typeInterfaces.Select(x => x.GetCustomAttribute<DynamoDbTableAttribute>()?.TableName).FirstOrDefault(x => x != null) ?? 
+                    TableName ??= type.GetCustomAttribute<DynamoDbTableAttribute>()?.TableName ??
+                                  typeInterfaces.Select(x => x.GetCustomAttribute<DynamoDbTableAttribute>()?.TableName).FirstOrDefault(x => x != null) ?? 
                                   baseTypes.Select(x => x.GetCustomAttribute<DynamoDbTableAttribute>()?.TableName).FirstOrDefault(x => x != null);
 
                     // Check if any of the interfaces has DynamoDbAutoPropertyAttribute
-                    var autoProperty = 
+                    var autoProperty = type.GetCustomAttribute<DynamoDbAutoPropertyAttribute>() != null ||
                         baseTypes.Any(x => x.GetCustomAttribute<DynamoDbAutoPropertyAttribute>() != null) ||
                         typeInterfaces.Any(x => x.GetCustomAttribute<DynamoDbAutoPropertyAttribute>() != null);
             
@@ -91,7 +92,7 @@ namespace EfficientDynamoDb.Internal.Metadata
                         .ToHashSet();
                     
                     var propList = 
-                        baseTypes.SelectMany(x => x.GetProperties(BindingFlags));
+                        type.GetProperties(BindingFlags).Concat(baseTypes.SelectMany(x => x.GetProperties(BindingFlags)));
 
                     var allProps = propList.Concat(type.GetProperties(BindingFlags));
 
