@@ -40,6 +40,22 @@ namespace EfficientDynamoDb.Internal.Metadata
         public DdbPropertyInfo? SortKey { get; }
         
         public DdbPropertyInfo? Version { get; }
+        
+        private static IEnumerable<Type> GetBaseTypes(Type type)
+        {
+            var currentType = type.BaseType;
+            while (currentType != null)
+            {
+                yield return currentType;
+                currentType = currentType.BaseType;
+            }
+        }
+
+        private const BindingFlags BindingFlags =
+            global::System.Reflection.BindingFlags.Instance |
+            global::System.Reflection.BindingFlags.Public |
+            global::System.Reflection.BindingFlags.NonPublic |
+            global::System.Reflection.BindingFlags.DeclaredOnly;
 
         public DdbClassInfo(Type type, DynamoDbContextMetadata metadata, DdbConverter converter)
         {
@@ -51,81 +67,75 @@ namespace EfficientDynamoDb.Internal.Metadata
             ConverterBase = converter;
             ConverterType = converter.GetType();
             ClassType = ConverterBase.ClassType;
-            var typeInterfaces = new Stack<Type>(type.GetInterfaces());
-
-            // Check if any of the interfaces has DynamoDbAutoPropertyAttribute
-            var autoProperty = typeInterfaces.Any(x => x.GetCustomAttribute<DynamoDbAutoPropertyAttribute>() != null);
-            
-            // We store explicitly ignored properties to avoid adding them implicitly via auto property
-            var explicitlyIgnored = typeInterfaces.SelectMany(x => x.GetProperties())
-                .Where(x => x.GetCustomAttribute<DynamoDbIgnoreAttribute>() != null)
-                .Select(p => p.Name)
-                .ToHashSet();
+            TableName ??= type.GetCustomAttribute<DynamoDbTableAttribute>()?.TableName;
 
             switch (ClassType)
             {
                 case DdbClassType.Object:
                 {
-                    for (var currentType = type; currentType != null || typeInterfaces.Count > 0; currentType = currentType?.BaseType)
+                    var typeInterfaces = type.GetInterfaces().ToHashSet();
+                    var baseTypes = GetBaseTypes(type).ToHashSet();
+                    
+                    TableName ??= typeInterfaces.Select(x => x.GetCustomAttribute<DynamoDbTableAttribute>()?.TableName).FirstOrDefault(x => x != null) ?? 
+                                  baseTypes.Select(x => x.GetCustomAttribute<DynamoDbTableAttribute>()?.TableName).FirstOrDefault(x => x != null);
+
+                    // Check if any of the interfaces has DynamoDbAutoPropertyAttribute
+                    var autoProperty = 
+                        baseTypes.Any(x => x.GetCustomAttribute<DynamoDbAutoPropertyAttribute>() != null) ||
+                        typeInterfaces.Any(x => x.GetCustomAttribute<DynamoDbAutoPropertyAttribute>() != null);
+            
+                    // We store explicitly ignored properties to avoid adding them implicitly via auto property
+                    var explicitlyIgnored = typeInterfaces.SelectMany(x => x.GetProperties())
+                        .Where(x => x.GetCustomAttribute<DynamoDbIgnoreAttribute>() != null)
+                        .Select(p => p.Name)
+                        .ToHashSet();
+                    
+                    var propList = 
+                        baseTypes.SelectMany(x => x.GetProperties(BindingFlags));
+
+                    var allProps = propList.Concat(type.GetProperties(BindingFlags));
+
+                    foreach (PropertyInfo propertyInfo in allProps)
                     {
-                        if (currentType?.BaseType == null && typeInterfaces.Count <= 0)
+                        if (propertyInfo.GetCustomAttribute<DynamoDbIgnoreAttribute>() != null)
                             continue;
                         
-                        currentType ??= typeInterfaces.Pop();
+                        var attribute = propertyInfo.GetCustomAttribute<DynamoDbPropertyAttribute>();
                         
-                        // If auto property is not set, check if the current type has DynamoDbAutoPropertyAttribute
-                        if(!autoProperty)
-                            autoProperty = currentType.GetCustomAttribute<DynamoDbAutoPropertyAttribute>() != null;
+                        // If property is an auto property and doesn't have a DynamoDbPropertyAttribute and it's not explicitly ignored
+                        if (autoProperty && attribute == null && !explicitlyIgnored.Contains(propertyInfo.Name)) 
+                            attribute ??= new DynamoDbPropertyAttribute(propertyInfo.Name);
                         
-                        const BindingFlags bindingFlags =
-                            BindingFlags.Instance |
-                            BindingFlags.Public |
-                            BindingFlags.NonPublic |
-                            BindingFlags.DeclaredOnly;
+                        if (attribute == null)
+                            continue;
 
-                        foreach (PropertyInfo propertyInfo in currentType.GetProperties(bindingFlags))
+                        if (properties.ContainsKey(attribute.Name))
+                            continue;
+
+                        var propertyConverter = metadata.GetOrAddConverter(propertyInfo.PropertyType, attribute.DdbConverterType);
+
+                        var ddbPropertyInfo = propertyConverter.CreateDdbPropertyInfo(propertyInfo, attribute.Name, attribute.AttributeType, metadata);
+                        properties.Add(attribute.Name, ddbPropertyInfo);
+                        jsonProperties.Add(attribute.Name, ddbPropertyInfo);
+
+                        switch (attribute.AttributeType)
                         {
-                            if (propertyInfo.GetCustomAttribute<DynamoDbIgnoreAttribute>() != null)
-                                continue;
-                            
-                            var attribute = propertyInfo.GetCustomAttribute<DynamoDbPropertyAttribute>();
-                            
-                            // If property is an auto property and doesn't have a DynamoDbPropertyAttribute and it's not explicitly ignored
-                            if (autoProperty && attribute == null && !explicitlyIgnored.Contains(propertyInfo.Name)) 
-                                attribute ??= new DynamoDbPropertyAttribute(propertyInfo.Name);
-                            
-                            if (attribute == null)
-                                continue;
-
-                            if (properties.ContainsKey(attribute.Name))
-                                continue;
-
-                            var propertyConverter = metadata.GetOrAddConverter(propertyInfo.PropertyType, attribute.DdbConverterType);
-
-                            var ddbPropertyInfo = propertyConverter.CreateDdbPropertyInfo(propertyInfo, attribute.Name, attribute.AttributeType, metadata);
-                            properties.Add(attribute.Name, ddbPropertyInfo);
-                            jsonProperties.Add(attribute.Name, ddbPropertyInfo);
-
-                            switch (attribute.AttributeType)
-                            {
-                                case DynamoDbAttributeType.PartitionKey:
-                                    if (PartitionKey != null)
-                                        throw new DdbException($"An entity {Type.FullName} contains multiple partition key attributes");
-                                    PartitionKey = ddbPropertyInfo;
-                                    break;
-                                case DynamoDbAttributeType.SortKey:
-                                    if (SortKey != null)
-                                        throw new DdbException($"An entity {Type.FullName} contains multiple sort key attributes");
-                                    SortKey = ddbPropertyInfo;
-                                    break;
-                            }
-
-                            if (Version == null && propertyInfo.GetCustomAttribute<DynamoDbVersionAttribute>() != null)
-                                Version = ddbPropertyInfo;
+                            case DynamoDbAttributeType.PartitionKey:
+                                if (PartitionKey != null)
+                                    throw new DdbException($"An entity {Type.FullName} contains multiple partition key attributes");
+                                PartitionKey = ddbPropertyInfo;
+                                break;
+                            case DynamoDbAttributeType.SortKey:
+                                if (SortKey != null)
+                                    throw new DdbException($"An entity {Type.FullName} contains multiple sort key attributes");
+                                SortKey = ddbPropertyInfo;
+                                break;
                         }
 
-                        TableName ??= currentType.GetCustomAttribute<DynamoDbTableAttribute>()?.TableName;
+                        if (Version == null && propertyInfo.GetCustomAttribute<DynamoDbVersionAttribute>() != null)
+                            Version = ddbPropertyInfo;
                     }
+                
                     Constructor = EmitMemberAccessor.CreateConstructor(type) ?? throw new InvalidOperationException($"Can't generate constructor delegate for type '{type}'.");
                     
                     break;
