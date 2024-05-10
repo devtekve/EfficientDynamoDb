@@ -53,6 +53,7 @@ namespace EfficientDynamoDb.Internal.Metadata
             ClassType = ConverterBase.ClassType;
             var typeInterfaces = new Stack<Type>(type.GetInterfaces());
 
+            // Check if any of the interfaces has DynamoDbAutoPropertyAttribute
             var autoProperty = typeInterfaces.Any(x => x.GetCustomAttribute<DynamoDbAutoPropertyAttribute>() != null);
             
             // We store explicitly ignored properties to avoid adding them implicitly via auto property
@@ -71,6 +72,11 @@ namespace EfficientDynamoDb.Internal.Metadata
                             continue;
                         
                         currentType ??= typeInterfaces.Pop();
+                        
+                        // If auto property is not set, check if the current type has DynamoDbAutoPropertyAttribute
+                        if(!autoProperty)
+                            autoProperty = currentType.GetCustomAttribute<DynamoDbAutoPropertyAttribute>() != null;
+                        
                         const BindingFlags bindingFlags =
                             BindingFlags.Instance |
                             BindingFlags.Public |
