@@ -3,7 +3,7 @@ name: Build AWS SDK credentials compatibility package
 on:
   push:
     branches:
-      - main
+      - devtekve
     tags:
       - 'creds-awssdk-v*'
     paths:

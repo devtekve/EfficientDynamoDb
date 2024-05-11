@@ -3,14 +3,14 @@ name: Build EfficientDynamoDb
 on:
   push:
     branches:
-      - main
+      - devtekve
     tags:
       - 'effddb-v*'
     paths:
       - 'src/**'
   pull_request:
     branches:
-      - main
+      - devtekve
     paths:
       - 'src/**'
 
