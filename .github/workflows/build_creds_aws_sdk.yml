@@ -28,8 +28,8 @@ jobs:
         run: dotnet build src/EfficientDynamoDb.Credentials.AWSSDK/EfficientDynamoDb.Credentials.AWSSDK.csproj --configuration Release --no-restore
       - name: Nuget publish
         run: |
-          dotnet remove EfficientDynamoDb.Credentials.AWSSDK.csproj reference "..\EfficientDynamoDb\EfficientDynamoDb.csproj"
-          dotnet add package DevTekVE.EfficientDynamoDb --prerelease
+          dotnet remove src/EfficientDynamoDb.Credentials.AWSSDK/EfficientDynamoDb.Credentials.AWSSDK.csproj reference "..\EfficientDynamoDb\EfficientDynamoDb.csproj"
+          dotnet add src/EfficientDynamoDb.Credentials.AWSSDK/EfficientDynamoDb.Credentials.AWSSDK.csproj package DevTekVE.EfficientDynamoDb --prerelease
           dotnet pack -p:PackageId=DevTekVE.EfficientDynamoDb.Credentials.AWSSDK -p:Description="This is a fork for own development. Use at your own Risk. No guarantees are made." --no-build -c Release src/EfficientDynamoDb.Credentials.AWSSDK/EfficientDynamoDb.Credentials.AWSSDK.csproj -o .
           dotnet nuget push *.nupkg -s https://api.nuget.org/v3/index.json -k ${{secrets.NUGET_API_KEY}} --skip-duplicate
   
