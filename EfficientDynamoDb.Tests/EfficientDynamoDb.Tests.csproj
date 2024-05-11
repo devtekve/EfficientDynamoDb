@@ -14,5 +14,4 @@
     <ItemGroup>
       <ProjectReference Include="..\src\EfficientDynamoDb\EfficientDynamoDb.csproj" />
     </ItemGroup>
-
 </Project>
