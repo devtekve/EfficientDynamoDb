@@ -1,6 +1,7 @@
 name: Build EfficientDynamoDb
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - devtekve
